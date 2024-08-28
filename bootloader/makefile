@@ -1,10 +1,9 @@
 output_dir = ../build
 
-all: bootloader.bin
+$(output_dir)/bootloader.bin: bootloader.asm
+	nasm -f bin -o $(output_dir)/bootloader.bin bootloader.asm 
 
-bootloader.bin:
-	fasm bootloader.asm bootloader.bin
-	mv bootloader.bin $(output_dir)/bootloader.bin
+.PHONY: clean
 
 clean:
 	rm -f $(output_dir)/bootloader.bin

@@ -1,24 +1,228 @@
-org 0x7C00
-use16
+org 0x7c00
+BITS 16
 
-    mov si, hello
-    call printfunc
+VGA.Width equ 80
+VGA.Height equ 25
 
-forever:
-    jmp forever
+    xor ax, ax
+    mov ds, ax                      ; set data segment
+    mov ss, ax                      ; set stack segment
+    mov sp, 0x9c00                  ; set stack pointer
 
-printfunc:
-    lodsb       ; loads [si] into al
-    or al, al   ; if al == 0
-    jz .printfunc_end
-    mov ah, byte 0x0e
-    mov bx, word 0x03
-    int 0x10
-    jmp printfunc
-.printfunc_end:
+    mov ax, 0xb800                  ; text video memory
+    mov es, ax
+
+    call clear_screen
+
+    cld
+    mov si, os_loaded_msg
+    call sprint
+
+    ; set up keyboard handler
+    cli                             ; disable interrupts
+    mov bx, 0x09                    ; hardware interrupt #
+    shl bx, 2                       ; multiply by 4
+    xor ax, ax
+    mov gs, ax                      ; start of memory
+    mov [gs:bx], word keyhandler    ; IVT points to our handler
+    mov [gs:bx+2], ds               ; segment
+    sti                             ; enable interrupts
+
+    jmp $                           ; loop forever
+
+;------------------------------------------------------------------
+keyhandler:
+    in al, 0x60                     ; get key data
+    mov bl, al                      ; save it
+    mov byte [port60], al
+
+    in al, 0x61                     ; keyboard control
+    mov ah, al
+    or al, 0x80                     ; disable bit 7
+    out 0x61, al                    ; send it back
+    xchg ah, al                     ; get original
+    out 0x61, al                    ; send that back
+
+    mov al, 0x20                    ; end of interrupt
+    out 0x20, al
+
+    and bl, 0x80                    ; key released
+    jnz .done                       ; don't repeat
+
+    mov ax, [port60]
+    mov word [reg16], ax
+    call printreg16
+.done:
+    iret
+
+;------------------------------------------------------------------
+dochar:
+    call cprint                     ; print one character
+
+sprint:
+    lodsb                           ; string char to AL
+    cmp al, 0
+    jne dochar                      ; else, we're done
+    call move_cursor
     ret
 
-hello:  db 'Falcon OS successfully booted.',0
+cprint:
+    cmp al, 0x0A
+    je .newline
 
-pad:    db 510 - ($ - $$) dup 0
-        db 0x55, 0xaa
+    mov ah, 0x0F                    ; attrib = white on black
+    mov cx, ax                      ; save char/attribute
+    movzx ax, byte [ypos]
+    mov dx, 160                     ; 2 bytes (char/attrib)
+    mul dx                          ; for 80 columns
+    movzx bx, byte [xpos]
+    shl bx, 1                       ; times 2 to skip attrib
+
+    mov di, 0                       ; start of video memory
+    add di, ax                      ; add y offset
+    add di, bx                      ; add x offset
+
+    mov ax, cx                      ; restore char/attribute
+    stosw                           ; write char/attribute
+    add byte [xpos], 1              ; advance to right
+    jmp .done
+
+.newline:
+    mov byte [xpos], 0              ; cr
+    mov al, byte [ypos]
+    cmp al, (VGA.Height - 1)        ; already on the bottom line?
+    je .at_bottom
+    add byte [ypos], 1
+    jmp .done
+
+.at_bottom:
+    call scroll_up
+.done:
+    ret
+
+;------------------------------------------------------------------
+new_line:
+
+    ret
+
+;------------------------------------------------------------------
+move_cursor:
+    movzx ax, byte [ypos]
+    movzx bx, byte [xpos]
+	mov dl, VGA.Width
+	mul dl
+	add bx, ax
+
+	mov dx, 0x03D4
+	mov al, 0x0F
+	out dx, al
+
+	inc dl
+	mov al, bl
+	out dx, al
+
+	dec dl
+	mov al, 0x0E
+	out dx, al
+
+	inc dl
+	mov al, bh
+	out dx, al
+
+	ret
+
+;------------------------------------------------------------------
+clear_screen:
+    push ax
+    push cx
+    push di
+    push es
+
+    mov ax, 0xb800                  ; text video memory
+    mov es, ax
+
+    mov cx, VGA.Width * VGA.Height
+    xor di, di
+    mov ax, 0x0F20
+    rep stosw
+
+    pop es
+    pop di
+    pop cx
+    pop ax
+
+    ret
+
+;------------------------------------------------------------------
+; movsw Move word at address DS:(E)SI to address ES:(E)DI
+
+scroll_up:
+    push ax
+    push bx
+    push cx
+    push si
+    push di
+    push ds
+    push es
+
+    mov ax, 0xb800                  ; text video memory
+    mov es, ax
+    mov ds, ax
+
+    xor bx, bx
+    xor di, di
+    mov si, 160
+
+.loop:
+    mov cx, 80
+    rep movsw
+    inc bx
+    cmp bx, VGA.Height - 1
+    jl .loop
+    mov cx, 80
+    mov ax, 0x0F20
+    rep stosw
+
+    pop es
+    pop ds
+    pop di
+    pop si
+    pop cx
+    pop bx
+    pop ax
+
+    ret
+
+;------------------------------------------------------------------
+printreg16:
+   mov di, outstr16
+   mov ax, [reg16]
+   mov si, hexstr
+   mov cx, 4   ;four places
+hexloop:
+   rol ax, 4   ;leftmost will
+   mov bx, ax   ; become
+   and bx, 0x0f   ; rightmost
+   mov bl, [si + bx];index into hexstr
+   mov [di], bl
+   inc di
+   dec cx
+   jnz hexloop
+ 
+   mov si, outstr16
+   call sprint
+ 
+   ret
+
+;------------------------------------------------------------------
+xpos                    db 0
+ypos                    db 0
+port60                  dw 0
+os_loaded_msg           db 'LameOS loaded.', 0x0A, 0
+
+hexstr                  db '0123456789ABCDEF'
+outstr16                db '0000', 0x0A, 0  ;register value string
+reg16                   dw 0  ; pass values to printreg16
+
+TIMES 510 - ($ - $$) db 0	        ; Fill the rest of sector with 0
+DW 0xAA55			                ; Add boot signature at the end of bootloader
