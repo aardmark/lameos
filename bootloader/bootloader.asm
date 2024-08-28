@@ -50,8 +50,14 @@ keyhandler:
     jnz .done                       ; don't repeat
 
     mov ax, [port60]
+    cmp ax, 0x1c
+    je .newline
     mov word [reg16], ax
     call printreg16
+    jmp .done
+.newline:
+    mov si, carriage_return
+    call sprint
 .done:
     iret
 
@@ -84,6 +90,11 @@ cprint:
 
     mov ax, cx                      ; restore char/attribute
     stosw                           ; write char/attribute
+
+    movzx ax, byte [xpos]
+    cmp ax, VGA.Width - 1
+    je .newline
+
     add byte [xpos], 1              ; advance to right
     jmp .done
 
@@ -98,11 +109,6 @@ cprint:
 .at_bottom:
     call scroll_up
 .done:
-    ret
-
-;------------------------------------------------------------------
-new_line:
-
     ret
 
 ;------------------------------------------------------------------
@@ -154,11 +160,8 @@ clear_screen:
     ret
 
 ;------------------------------------------------------------------
-; movsw Move word at address DS:(E)SI to address ES:(E)DI
-
 scroll_up:
     push ax
-    push bx
     push cx
     push si
     push di
@@ -169,16 +172,11 @@ scroll_up:
     mov es, ax
     mov ds, ax
 
-    xor bx, bx
     xor di, di
     mov si, 160
 
-.loop:
-    mov cx, 80
+    mov cx, 1920
     rep movsw
-    inc bx
-    cmp bx, VGA.Height - 1
-    jl .loop
     mov cx, 80
     mov ax, 0x0F20
     rep stosw
@@ -188,7 +186,6 @@ scroll_up:
     pop di
     pop si
     pop cx
-    pop bx
     pop ax
 
     ret
@@ -219,10 +216,10 @@ xpos                    db 0
 ypos                    db 0
 port60                  dw 0
 os_loaded_msg           db 'LameOS loaded.', 0x0A, 0
-
+carriage_return         db 0x0A, 0
 hexstr                  db '0123456789ABCDEF'
-outstr16                db '0000', 0x0A, 0  ;register value string
-reg16                   dw 0  ; pass values to printreg16
+outstr16                db '0000', 0    ; register value string
+reg16                   dw 0            ; pass values to printreg16
 
-TIMES 510 - ($ - $$) db 0	        ; Fill the rest of sector with 0
-DW 0xAA55			                ; Add boot signature at the end of bootloader
+TIMES 510 - ($ - $$) db 0	            ; Fill the rest of sector with 0
+DW 0xAA55			                    ; Add boot signature at the end of bootloader
