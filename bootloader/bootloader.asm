@@ -20,7 +20,7 @@ VGA.Height equ 25
 
     ; set up keyboard handler
     cli                             ; disable interrupts
-    mov bx, 0x09                    ; hardware interrupt #
+    mov bx, 0x09                    ; hardware interrupt # (irq1???)
     shl bx, 2                       ; multiply by 4
     xor ax, ax
     mov gs, ax                      ; start of memory
